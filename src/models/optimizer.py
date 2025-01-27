@@ -1689,4 +1689,310 @@ class UserOptimizer:
         for _ in range(min_partners):
             structure.add_partner(pv_per_partner, upline_id)
 
+class ScenarioAnalyzer:
+    def __init__(self):
+        self.optimal_personal_pv = 200
+        
+    def generate_scenarios(self, total_pv: float) -> List[Dict]:
+        """
+        Генерирует различные сценарии распределения PV
+        Args:
+            total_pv: Общий объем PV для распределения
+        Returns:
+            List[Dict]: Список сценариев с их метриками
+        """
+        scenarios = []
+        
+        # Сценарий 1: Все PV в личных продажах
+        structure1 = NetworkStructure(total_pv)
+        structure1.partners[structure1.root_id].pv = total_pv
+        scenarios.append({
+            'name': 'Все PV в личных продажах',
+            'structure': structure1,
+            'metrics': self.analyze_scenario(structure1)
+        })
+        
+        # Сценарий 2: Равномерное распределение между партнерами
+        structure2 = NetworkStructure(total_pv)
+        optimal_partners = max(1, int(total_pv / self.optimal_personal_pv))
+        pv_per_partner = total_pv / (optimal_partners + 1)  # +1 для учета корневого партнера
+        structure2.partners[structure2.root_id].pv = pv_per_partner
+        for _ in range(optimal_partners):
+            structure2.add_partner(pv_per_partner, structure2.root_id)
+        scenarios.append({
+            'name': 'Равномерное распределение между партнерами',
+            'structure': structure2,
+            'metrics': self.analyze_scenario(structure2)
+        })
+        
+        # Сценарий 3: Формирование квалификации M3
+        if total_pv >= 3000:  # Минимальный GO для M3
+            structure3 = NetworkStructure(total_pv)
+            structure3.partners[structure3.root_id].pv = self.optimal_personal_pv
+            remaining_pv = total_pv - self.optimal_personal_pv
+            self._build_qualification_structure(structure3, structure3.root_id, 'M3', remaining_pv)
+            scenarios.append({
+                'name': 'Формирование квалификации M3',
+                'structure': structure3,
+                'metrics': self.analyze_scenario(structure3)
+            })
+        
+        # Сценарий 4: Формирование квалификации B3
+        if total_pv >= 10000:  # Минимальный GO для B3
+            structure4 = NetworkStructure(total_pv)
+            structure4.partners[structure4.root_id].pv = self.optimal_personal_pv
+            remaining_pv = total_pv - self.optimal_personal_pv
+            self._build_qualification_structure(structure4, structure4.root_id, 'B3', remaining_pv)
+            scenarios.append({
+                'name': 'Формирование квалификации B3',
+                'structure': structure4,
+                'metrics': self.analyze_scenario(structure4)
+            })
+        
+        # Сценарий 5: Формирование квалификации TOP
+        if total_pv >= 16000:  # Минимальный GO для TOP
+            structure5 = NetworkStructure(total_pv)
+            structure5.partners[structure5.root_id].pv = self.optimal_personal_pv
+            remaining_pv = total_pv - self.optimal_personal_pv
+            self._build_qualification_structure(structure5, structure5.root_id, 'TOP', remaining_pv)
+            scenarios.append({
+                'name': 'Формирование квалификации TOP',
+                'structure': structure5,
+                'metrics': self.analyze_scenario(structure5)
+            })
+        
+        # Сортируем сценарии по общей эффективности
+        for scenario in scenarios:
+            metrics = scenario['metrics']
+            # Рассчитываем общий скор на основе дохода и рисков
+            total_score = (metrics['efficiency'] * 0.7 + (1 - metrics['risk_score']) * 0.3)
+            metrics['total_score'] = total_score
+            
+        scenarios.sort(key=lambda x: x['metrics']['total_score'], reverse=True)
+        return scenarios
+
+    def analyze_scenario(self, structure: NetworkStructure) -> Dict:
+        """
+        Анализирует конкретный сценарий распределения PV
+        Args:
+            structure: Структура сети для анализа
+        Returns:
+            Dict: Метрики сценария
+        """
+        structure.update_qualifications()
+        root_partner = structure.partners[structure.root_id]
+        
+        # Расчет личного бонуса (LO)
+        personal_bonus = 0
+        if root_partner.pv >= 70:  # Базовый уровень активности
+            personal_bonus = root_partner.pv * 0.05  # 5% от личных продаж
+        if root_partner.pv >= 200:  # Повышенный коэффициент
+            personal_bonus = root_partner.pv * 0.10  # 10% от личных продаж
+            
+        # Расчет партнерского бонуса (PB)
+        partner_bonus = 0
+        active_partners = len([p for p in structure.partners.values() 
+                             if p.upline_id == structure.root_id and p.pv >= 70])
+        
+        # Премиальные выплаты за количество активных партнеров
+        if active_partners >= 15:
+            partner_bonus += 500
+        elif active_partners >= 12:
+            partner_bonus += 400
+        elif active_partners >= 9:
+            partner_bonus += 300
+        elif active_partners >= 7:
+            partner_bonus += 200
+        elif active_partners >= 5:
+            partner_bonus += 100
+            
+        # Расчет группового бонуса (GO)
+        group_bonus = 0
+        group_volume = structure.calculate_group_volume(structure.root_id)
+        qualification = root_partner.qualification
+        
+        # Процент от общего объема структуры в зависимости от квалификации
+        go_bonus_rates = {
+            'M1': 0.05, 'M2': 0.10, 'M3': 0.15,
+            'B1': 0.20, 'B2': 0.25, 'B3': 0.30,
+            'TOP': 0.35, 'TOP1': 0.37, 'TOP2': 0.39,
+            'TOP3': 0.41, 'TOP4': 0.43, 'TOP5': 0.45,
+            'AC1': 0.47, 'AC2': 0.49, 'AC3': 0.51,
+            'AC4': 0.53, 'AC5': 0.55, 'AC6': 0.57
+        }
+        
+        if qualification in go_bonus_rates:
+            group_bonus = group_volume * go_bonus_rates[qualification]
+            
+        # Расчет клубных бонусов
+        club_bonus = 0
+        if qualification in ['M3', 'B1', 'B2', 'B3', 'TOP']:
+            if qualification == 'M3':
+                club_bonus = group_volume * 0.02  # +2% от GO при M3
+            elif qualification in ['B1', 'B2', 'B3']:
+                club_bonus = group_volume * 0.04  # +4% от GO при B1 и выше
+                if qualification == 'B1':
+                    club_bonus += group_volume * 0.01  # +1% Travel Club
+            elif qualification == 'B3':
+                club_bonus += group_volume * 0.01  # +1% TOP Club
+                
+        total_income = personal_bonus + partner_bonus + group_bonus + club_bonus
+        
+        metrics = {
+            'total_income': total_income,
+            'personal_bonus': personal_bonus,
+            'partner_bonus': partner_bonus,
+            'group_bonus': group_bonus,
+            'club_bonus': club_bonus,
+            'qualification': qualification,
+            'active_partners': active_partners,
+            'group_volume': group_volume,
+            'side_volume': structure.calculate_side_volume(structure.root_id),
+            'efficiency': total_income / structure.total_pv,
+            'risk_score': self._calculate_risk_score(structure)
+        }
+        
+        return metrics
+        
+    def _calculate_risk_score(self, structure: NetworkStructure) -> float:
+        """
+        Рассчитывает оценку риска для данной структуры
+        Args:
+            structure: Структура сети
+        Returns:
+            float: Оценка риска от 0 до 1
+        """
+        risks = []
+        
+        # Риск 1: Слишком много PV в одной ветке
+        max_branch_volume = max(
+            structure.calculate_group_volume(pid) 
+            for pid in structure.partners[structure.root_id].downline_ids
+        ) if structure.partners[structure.root_id].downline_ids else 0
+        
+        total_volume = structure.calculate_group_volume(structure.root_id)
+        volume_concentration = max_branch_volume / total_volume if total_volume > 0 else 0
+        risks.append(volume_concentration * 0.3)  # Вес риска концентрации объема
+        
+        # Риск 2: Малое количество активных партнеров
+        active_partners = structure.calculate_active_partners(structure.root_id)
+        min_recommended = 5  # Минимальное рекомендуемое количество партнеров
+        partner_risk = max(0, 1 - active_partners / min_recommended)
+        risks.append(partner_risk * 0.2)  # Вес риска малого количества партнеров
+        
+        # Риск 3: Нестабильность квалификации
+        qual = structure.partners[structure.root_id].qualification
+        qual_requirements = QUALIFICATIONS.get(qual, {})
+        required_go = qual_requirements.get('go', 0)
+        current_go = structure.calculate_group_volume(structure.root_id)
+        
+        qualification_stability = (
+            1 - (current_go - required_go) / required_go 
+            if required_go > 0 else 0
+        )
+        risks.append(qualification_stability * 0.5)  # Вес риска нестабильности квалификации
+        
+        return sum(risks)
+
+    def _build_qualification_structure(self, structure: NetworkStructure, 
+                                    upline_id: int, target_qual: str, 
+                                    remaining_pv: float) -> None:
+        """
+        Строит структуру для достижения целевой квалификации
+        Args:
+            structure: Структура сети
+            upline_id: ID вышестоящего партнера
+            target_qual: Целевая квалификация
+            remaining_pv: Оставшийся объем для распределения
+        """
+        # Получаем требования для квалификации из reward_plan.md
+        if target_qual == 'M3':
+            # M3 требует:
+            # GO: 3,000 PV
+            # Активных партнеров: 4
+            required_go = 3000
+            required_partners = 4
+            pv_per_partner = 750  # Распределяем GO равномерно
+            
+            for _ in range(required_partners):
+                if remaining_pv >= pv_per_partner:
+                    structure.add_partner(pv_per_partner, upline_id)
+                    remaining_pv -= pv_per_partner
+                    
+        elif target_qual == 'B3':
+            # B3 требует:
+            # GO: 10,000 PV
+            # Боковой объем: 1,000 PV
+            # Активных партнеров: 7
+            # M3 в структуре: 3
+            required_go = 10000
+            required_side_volume = 1000
+            required_partners = 7
+            required_m3 = 3
+            
+            # Сначала добавляем партнеров для бокового объема
+            side_partners = 2  # Минимум 2 партнера для бокового объема
+            side_pv = required_side_volume / side_partners
+            for _ in range(side_partners):
+                if remaining_pv >= side_pv:
+                    structure.add_partner(side_pv, upline_id)
+                    remaining_pv -= side_pv
+            
+            # Затем добавляем M3 партнеров
+            m3_pv = (required_go - required_side_volume) / required_m3
+            for _ in range(required_m3):
+                if remaining_pv >= m3_pv:
+                    partner_id = structure.add_partner(self.optimal_personal_pv, upline_id)
+                    remaining_pv -= self.optimal_personal_pv
+                    # Рекурсивно строим M3 структуру
+                    self._build_qualification_structure(structure, partner_id, 'M3', 
+                                                     m3_pv - self.optimal_personal_pv)
+            
+            # Добавляем оставшихся активных партнеров
+            remaining_partners = required_partners - side_partners - required_m3
+            if remaining_partners > 0:
+                pv_per_partner = remaining_pv / remaining_partners
+                for _ in range(remaining_partners):
+                    if remaining_pv >= pv_per_partner:
+                        structure.add_partner(pv_per_partner, upline_id)
+                        remaining_pv -= pv_per_partner
+                        
+        elif target_qual == 'TOP':
+            # TOP требует:
+            # GO: 16,000 PV
+            # Боковой объем: 1,000 PV
+            # Активных партнеров: 8
+            # M3 в структуре: 5
+            required_go = 16000
+            required_side_volume = 1000
+            required_partners = 8
+            required_m3 = 5
+            
+            # Сначала добавляем партнеров для бокового объема
+            side_partners = 2
+            side_pv = required_side_volume / side_partners
+            for _ in range(side_partners):
+                if remaining_pv >= side_pv:
+                    structure.add_partner(side_pv, upline_id)
+                    remaining_pv -= side_pv
+            
+            # Затем добавляем M3 партнеров
+            m3_pv = (required_go - required_side_volume) / required_m3
+            for _ in range(required_m3):
+                if remaining_pv >= m3_pv:
+                    partner_id = structure.add_partner(self.optimal_personal_pv, upline_id)
+                    remaining_pv -= self.optimal_personal_pv
+                    # Рекурсивно строим M3 структуру
+                    self._build_qualification_structure(structure, partner_id, 'M3', 
+                                                     m3_pv - self.optimal_personal_pv)
+            
+            # Добавляем оставшихся активных партнеров
+            remaining_partners = required_partners - side_partners - required_m3
+            if remaining_partners > 0:
+                pv_per_partner = remaining_pv / remaining_partners
+                for _ in range(remaining_partners):
+                    if remaining_pv >= pv_per_partner:
+                        structure.add_partner(pv_per_partner, upline_id)
+                        remaining_pv -= pv_per_partner
+
     # ... rest of the existing code ... 

@@ -5,6 +5,7 @@ import numpy as np
 from typing import Dict, List
 from models.structure import NetworkStructure
 from utils.constants import QUALIFICATION_NAMES
+import streamlit as st
 
 # Цвета для квалификаций
 QUALIFICATION_COLORS = {
@@ -29,72 +30,68 @@ QUALIFICATION_COLORS = {
     'AC6': '#000000'    # Черный
 }
 
-def plot_network(structure: NetworkStructure) -> go.Figure:
-    """Создание интерактивной визуализации сети"""
-    G = structure.network
+def plot_network(structure: NetworkStructure, key: str = None) -> go.Figure:
+    """
+    Визуализирует структуру сети
+    Args:
+        structure: Структура сети для визуализации
+        key: Уникальный ключ для графика
+    Returns:
+        go.Figure: Объект фигуры Plotly
+    """
+    G = nx.Graph()
+    
+    # Добавляем узлы и ребра
+    for partner_id, partner in structure.partners.items():
+        G.add_node(partner_id, 
+                  pv=partner.pv,
+                  qualification=partner.qualification)
+        if partner.upline_id is not None:
+            G.add_edge(partner.upline_id, partner_id)
+    
+    # Создаем layout
     pos = nx.spring_layout(G)
     
-    # Создание рёбер
-    edge_x = []
-    edge_y = []
-    for edge in G.edges():
-        x0, y0 = pos[edge[0]]
-        x1, y1 = pos[edge[1]]
-        edge_x.extend([x0, x1, None])
-        edge_y.extend([y0, y1, None])
-        
+    # Создаем узлы
+    node_trace = go.Scatter(
+        x=[pos[k][0] for k in G.nodes()],
+        y=[pos[k][1] for k in G.nodes()],
+        mode='markers+text',
+        hoverinfo='text',
+        marker=dict(
+            size=20,
+            color=['blue' if n == structure.root_id else 'lightblue' for n in G.nodes()],
+            line=dict(width=2)
+        ),
+        text=[f"ID: {n}\nPV: {G.nodes[n]['pv']}\nQual: {G.nodes[n]['qualification']}"
+              for n in G.nodes()],
+        textposition="top center"
+    )
+    
+    # Создаем ребра
     edge_trace = go.Scatter(
-        x=edge_x, y=edge_y,
-        line=dict(width=0.5, color='#888'),
+        x=[],
+        y=[],
+        line=dict(width=1, color='#888'),
         hoverinfo='none',
         mode='lines'
     )
     
-    # Создание узлов
-    node_x = []
-    node_y = []
-    node_text = []
-    node_size = []
-    node_color = []
+    for edge in G.edges():
+        x0, y0 = pos[edge[0]]
+        x1, y1 = pos[edge[1]]
+        edge_trace['x'] += (x0, x1, None)
+        edge_trace['y'] += (y0, y1, None)
     
-    for node in G.nodes():
-        x, y = pos[node]
-        node_x.append(x)
-        node_y.append(y)
-        
-        partner = structure.partners[node]
-        node_text.append(
-            f"ID: {partner.id}<br>"
-            f"PV: {partner.pv:.0f}<br>"
-            f"Квал.: {QUALIFICATION_NAMES[partner.qualification]}"
-        )
-        node_size.append(np.sqrt(partner.pv) * 2)
-        node_color.append(QUALIFICATION_COLORS[partner.qualification])
-        
-    node_trace = go.Scatter(
-        x=node_x, y=node_y,
-        mode='markers+text',
-        hoverinfo='text',
-        text=node_text,
-        marker=dict(
-            size=node_size,
-            color=node_color,
-            line_width=2
-        )
-    )
-    
-    # Создание фигуры
-    fig = go.Figure(
-        data=[edge_trace, node_trace],
-        layout=go.Layout(
-            title='Структура сети',
-            showlegend=False,
-            hovermode='closest',
-            margin=dict(b=20,l=5,r=5,t=40),
-            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)
-        )
-    )
+    # Создаем фигуру
+    fig = go.Figure(data=[edge_trace, node_trace],
+                   layout=go.Layout(
+                       showlegend=False,
+                       hovermode='closest',
+                       margin=dict(b=20,l=5,r=5,t=40),
+                       xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+                       yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)
+                   ))
     
     return fig
 
