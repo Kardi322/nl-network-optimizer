@@ -49,8 +49,29 @@ def plot_network(structure: NetworkStructure, key: str = None) -> go.Figure:
         if partner.upline_id is not None:
             G.add_edge(partner.upline_id, partner_id)
     
-    # Создаем layout
-    pos = nx.spring_layout(G)
+    # Если сеть слишком большая, используем упрощенную визуализацию
+    if len(G.nodes()) > 100:
+        # Создаем круговой layout
+        radius = 1
+        num_nodes = len(G.nodes())
+        pos = {}
+        nodes = list(G.nodes())
+        
+        # Размещаем корневой узел в центре
+        root_id = structure.root_id
+        pos[root_id] = np.array([0, 0])
+        nodes.remove(root_id)
+        
+        # Размещаем остальные узлы по кругу
+        for i, node in enumerate(nodes):
+            angle = 2 * np.pi * i / (num_nodes - 1)
+            pos[node] = np.array([radius * np.cos(angle), radius * np.sin(angle)])
+    else:
+        try:
+            pos = nx.spring_layout(G, k=1/np.sqrt(len(G.nodes())), iterations=50)
+        except:
+            # Если spring_layout не работает, используем круговой layout
+            pos = nx.circular_layout(G)
     
     # Создаем узлы
     node_trace = go.Scatter(
